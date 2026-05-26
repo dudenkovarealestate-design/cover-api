@@ -193,26 +193,45 @@ def slide_stat(stat_num, stat_label, context, theme="blue"):
     W, H = img.size
     img = add_brand(img, CA)
     draw = ImageDraw.Draw(img)
-    f_big   = ImageFont.truetype(FONT_PATH, 190)
+    MAX_W = W - 120
+
+    # Большая цифра
+    f_big = ImageFont.truetype(FONT_PATH, 190)
+
+    # Подбираем размер stat_label чтобы влез в ширину
     f_label = ImageFont.truetype(FONT_PATH, 58)
-    f_ctx   = ImageFont.truetype(SANS_PATH, 36)
-    MAX_W = W-120
+    while draw.textbbox((0,0), stat_label, font=f_label)[2] > MAX_W and f_label.size > 28:
+        f_label = ImageFont.truetype(FONT_PATH, f_label.size - 2)
+
+    # Подбираем размер контекста
+    f_ctx = ImageFont.truetype(SANS_PATH, 34)
     ctx_lines = wrap_text(draw, context, f_ctx, MAX_W)
-    total_h = 210+74+40+len(ctx_lines)*52
-    y = (H-total_h)//2
-    bw = draw.textbbox((0,0),stat_num,font=f_big)[2]
-    img = draw_glow_text(img, stat_num, ((W-bw)//2,y), f_big, CA, CA, 32, 80)
+    # Если строк много — уменьшаем шрифт
+    while len(ctx_lines) * (f_ctx.size + 14) > 200 and f_ctx.size > 22:
+        f_ctx = ImageFont.truetype(SANS_PATH, f_ctx.size - 2)
+        ctx_lines = wrap_text(draw, context, f_ctx, MAX_W)
+
+    ctx_lh = f_ctx.size + 14
+    total_h = 210 + 74 + 40 + len(ctx_lines) * ctx_lh
+    y = (H - total_h) // 2
+
+    bw = draw.textbbox((0,0), stat_num, font=f_big)[2]
+    img = draw_glow_text(img, stat_num, ((W-bw)//2, y), f_big, CA, CA, 32, 80)
     draw = ImageDraw.Draw(img)
     y += 210
-    lw = draw.textbbox((0,0),stat_label,font=f_label)[2]
-    draw.text(((W-lw)//2,y), stat_label, font=f_label, fill=(255,255,255))
+
+    lw = draw.textbbox((0,0), stat_label, font=f_label)[2]
+    draw.text(((W-lw)//2, y), stat_label, font=f_label, fill=(255,255,255))
     y += 74
-    draw.rounded_rectangle([(W-90)//2,y,(W+90)//2,y+6], radius=3, fill=CA)
+
+    draw.rounded_rectangle([(W-90)//2, y, (W+90)//2, y+6], radius=3, fill=CA)
     y += 40
+
     for line in ctx_lines:
-        lw2 = draw.textbbox((0,0),line,font=f_ctx)[2]
-        draw.text(((W-lw2)//2,y), line, font=f_ctx, fill=tuple(min(255,c+60) for c in CA))
-        y += 52
+        lw2 = draw.textbbox((0,0), line, font=f_ctx)[2]
+        draw.text(((W-lw2)//2, y), line, font=f_ctx, fill=tuple(min(255,c+60) for c in CA))
+        y += ctx_lh
+
     return img
 
 def slide_cta(cta_text, theme="blue"):
