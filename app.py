@@ -8,19 +8,8 @@ app = Flask(__name__)
 FONT_PATH = os.path.join(os.path.dirname(__file__), "RussoOne-Regular.ttf")
 SANS_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
-def fit_text(draw, text, font_path, max_width, max_size=90, min_size=28):
-    """Подбирает размер шрифта чтобы текст влез в max_width"""
-    size = max_size
-    while size >= min_size:
-        font = ImageFont.truetype(font_path, size)
-        bbox = draw.textbbox((0, 0), text, font=font)
-        if bbox[2] - bbox[0] <= max_width:
-            return font, size
-        size -= 2
-    return ImageFont.truetype(font_path, min_size), min_size
-
-def wrap_text(draw, text, font_path, max_width, font_size):
-    """Разбивает текст на строки если не влезает"""
+def wrap_text_to_width(draw, text, font_path, max_width, font_size):
+    """Переносит текст на строки по ширине"""
     font = ImageFont.truetype(font_path, font_size)
     words = text.split()
     lines = []
@@ -38,11 +27,24 @@ def wrap_text(draw, text, font_path, max_width, font_size):
         lines.append(current)
     return lines, font
 
-def generate_cover(title1, title2, date=None, badge="ЕЖЕНЕДЕЛЬНЫЙ ДАЙДЖЕСТ", brand="БИЗНЕС-РОБОТИКС"):
+def find_best_size(draw, title1, title2, font_path, max_width, max_size=110, min_size=48):
+    """Подбирает максимальный размер шрифта при котором оба заголовка влезают"""
+    for size in range(max_size, min_size - 1, -2):
+        lines1, f1 = wrap_text_to_width(draw, title1, font_path, max_width, size)
+        lines2, f2 = wrap_text_to_width(draw, title2, font_path, max_width, size)
+        total_lines = len(lines1) + len(lines2)
+        line_h = size + 12
+        total_h = total_lines * line_h + 60  # 60 = разделитель + отступы
+        if total_h < 420:  # влезает в рабочую зону
+            return size, lines1, lines2
+    return min_size, *[wrap_text_to_width(draw, t, font_path, max_width, min_size)[:1] for t in [title1, title2]]
+
+def generate_cover(title1, title2, date=None, brand="БИЗНЕС-РОБОТИКС"):
     W, H = 1280, 720
     C_BLUE     = (0, 180, 255)
     C_BLUE_DIM = (0, 100, 150)
-    MAX_W = W - 96 - 200  # отступы + место для декора
+    PAD_X = 72
+    MAX_W = W - PAD_X * 2
 
     img = Image.new("RGB", (W, H), "#0a0f1e")
     draw = ImageDraw.Draw(img)
@@ -56,76 +58,60 @@ def generate_cover(title1, title2, date=None, badge="ЕЖЕНЕДЕЛЬНЫЙ Д
     # Glow
     glow = Image.new("RGB", (W, H), "#0a0f1e")
     gd = ImageDraw.Draw(glow)
-    for r in range(350, 0, -12):
+    for r in range(400, 0, -12):
         c = (0, max(0, 100 - r//4), min(220, 180 + r//5))
-        gd.ellipse([-100-r//2, H-100-r//2, -100+r, H-100+r], fill=c)
-    img = Image.blend(img, glow, 0.20)
+        gd.ellipse([-120-r//2, H-120-r//2, -120+r, H-120+r], fill=c)
+    img = Image.blend(img, glow, 0.22)
     draw = ImageDraw.Draw(img)
 
     # Угловые маркеры
     lw = 2
-    draw.line([(36, 28), (72, 28)],         fill=C_BLUE,     width=lw)
-    draw.line([(36, 28), (36, 64)],         fill=C_BLUE,     width=lw)
+    draw.line([(36, 28), (72, 28)], fill=C_BLUE, width=lw)
+    draw.line([(36, 28), (36, 64)], fill=C_BLUE, width=lw)
     draw.line([(W-36, H-28), (W-72, H-28)], fill=C_BLUE_DIM, width=lw)
     draw.line([(W-36, H-28), (W-36, H-64)], fill=C_BLUE_DIM, width=lw)
 
-    # Шрифты
-    russo_brand = ImageFont.truetype(FONT_PATH, 34)
-    russo_lg    = ImageFont.truetype(FONT_PATH, 32)
+    # Бренд — только один раз, вверху справа
     try:
-        sans = ImageFont.truetype(SANS_PATH, 20)
+        russo_brand = ImageFont.truetype(FONT_PATH, 30)
     except:
-        sans = ImageFont.truetype(FONT_PATH, 20)
-
-    # Бренд
+        russo_brand = ImageFont.truetype(FONT_PATH, 30)
     draw.text((W - 44, 32), brand, font=russo_brand, fill=C_BLUE, anchor="ra")
 
-    # Бейдж
-    bx, by = 48, 110
-    bbox = draw.textbbox((0, 0), badge, font=sans)
-    bw = bbox[2] - bbox[0] + 64
-    bh = 46
-    draw.rounded_rectangle([bx, by, bx+bw, by+bh], radius=23, fill=(0, 40, 70), outline=C_BLUE, width=1)
-    draw.ellipse([bx+16, by+18, bx+28, by+30], fill=C_BLUE)
-    draw.text((bx+38, by+10), badge, font=sans, fill=C_BLUE)
+    # Подбираем оптимальный размер шрифта
+    size, lines1, lines2 = find_best_size(draw, title1, title2, FONT_PATH, MAX_W)
+    font_main = ImageFont.truetype(FONT_PATH, size)
+    line_h = size + 14
 
-    # Вычисляем позиции с учётом наличия даты
+    # Общая высота текстового блока
     has_date = bool(date and date.strip())
+    russo_lg = ImageFont.truetype(FONT_PATH, 30)
+    date_h = 55 if has_date else 0
+    total_h = (len(lines1) + len(lines2)) * line_h + 20 + date_h  # 20 = разделитель
 
-    # Подбираем шрифт для title1
-    font1, size1 = fit_text(draw, title1, FONT_PATH, MAX_W, max_size=90, min_size=32)
+    # Вертикальное центрирование с небольшим смещением вниз
+    y = max(100, (H - total_h) // 2 + 20)
 
-    # Для title2 — сначала пробуем в одну строку
-    font2, size2 = fit_text(draw, title2, FONT_PATH, MAX_W, max_size=size1, min_size=28)
+    # title1 — белый
+    for line in lines1:
+        draw.text((PAD_X, y), line, font=font_main, fill=(255, 255, 255))
+        y += line_h
 
-    # Если title2 не влезает в одну строку — переносим
-    lines2, font2 = wrap_text(draw, title2, FONT_PATH, MAX_W, size2)
+    y += 4
 
-    # Высота блока
-    line_h1 = size1 + 10
-    line_h2 = size2 + 8
-    total_text_h = line_h1 + len(lines2) * line_h2
-
-    # Стартовая позиция — центрируем текстовый блок вертикально (смещаем вниз от центра)
-    y_start = max(180, H // 2 - total_text_h // 2 + 40)
-
-    # title1 (белый)
-    draw.text((48, y_start), title1, font=font1, fill=(255, 255, 255))
-    y_cur = y_start + line_h1 + 8
-
-    # title2 (синий, возможно несколько строк)
+    # title2 — синий
     for line in lines2:
-        draw.text((48, y_cur), line, font=font2, fill=C_BLUE)
-        y_cur += line_h2
+        draw.text((PAD_X, y), line, font=font_main, fill=C_BLUE)
+        y += line_h
 
     # Разделитель
-    y_cur += 8
-    draw.rounded_rectangle([48, y_cur, 118, y_cur+5], radius=3, fill=C_BLUE)
-    y_cur += 18
+    y += 12
+    draw.rounded_rectangle([PAD_X, y, PAD_X + 70, y + 5], radius=3, fill=C_BLUE)
+    y += 22
 
     # Дата — только если передана
     if has_date:
-        draw.text((48, y_cur), date, font=russo_lg, fill=(180, 220, 255))
+        draw.text((PAD_X, y), date, font=russo_lg, fill=(180, 220, 255))
 
     buf = io.BytesIO()
     img.save(buf, "PNG", quality=95)
@@ -137,11 +123,9 @@ def cover():
     data = request.json or {}
     title1 = data.get("title1", "")
     title2 = data.get("title2", "")
-    date   = data.get("date", "")      # пустая строка = без даты
-    badge  = data.get("badge", "БИЗНЕС-РОБОТИКС")
+    date   = data.get("date", "")
     brand  = data.get("brand", "БИЗНЕС-РОБОТИКС")
-
-    buf = generate_cover(title1, title2, date, badge, brand)
+    buf = generate_cover(title1, title2, date, brand)
     return send_file(buf, mimetype="image/png", download_name="cover.png")
 
 @app.route("/health")
