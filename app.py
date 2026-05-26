@@ -92,12 +92,6 @@ def slide_cover(title1, title2, badge, theme="blue", date=""):
     bw = draw.textbbox((0,0),"БИЗНЕС-РОБОТИКС",font=f_brand)[2]
     img = draw_glow_text(img, "БИЗНЕС-РОБОТИКС", (W-bw-40,32), f_brand, (255,255,255), CA, 10, 45)
     draw = ImageDraw.Draw(img)
-    f_badge = ImageFont.truetype(SANS_PATH, 22)
-    bx, by = 60, 100
-    bw2 = draw.textbbox((0,0),badge,font=f_badge)[2]+56
-    draw.rounded_rectangle([bx,by,bx+bw2,by+46], radius=23, fill=T["badge_bg"], outline=CA, width=1)
-    draw.ellipse([bx+14,by+18,bx+26,by+30], fill=CA)
-    draw.text((bx+38,by+10), badge, font=f_badge, fill=CA)
     f_xl = ImageFont.truetype(FONT_PATH, 104)
     MAX_W = W-120
     l1 = wrap_text(draw, title1, f_xl, MAX_W)
@@ -301,6 +295,42 @@ def cover():
         img = img.resize((1280,720), Image.LANCZOS)
     buf = img_to_bytes(img)
     return send_file(buf, mimetype="image/png", download_name="cover.png")
+
+@app.route("/slide", methods=["POST"])
+def slide():
+    """Генерирует один слайд по номеру используя кешированные данные сессии"""
+    d = request.json or {}
+    slide_num  = d.get("slide_num", 1)
+    theme      = d.get("theme", "blue")
+    title1     = d.get("title1", "")
+    title2     = d.get("title2", "")
+    badge      = d.get("badge", "БИЗНЕС-РОБОТИКС")
+    date       = d.get("date", "")
+    s2_accent  = d.get("s2_accent", "")
+    s2_bullets = d.get("s2_bullets", [])
+    s3_accent  = d.get("s3_accent", "")
+    s3_bullets = d.get("s3_bullets", [])
+    s3_plain   = d.get("s3_plain", "")
+    stat_num   = d.get("stat_num", "")
+    stat_label = d.get("stat_label", "")
+    stat_ctx   = d.get("stat_ctx", "")
+    cta_text   = d.get("cta_text", "")
+
+    if slide_num == 1:
+        img = slide_cover(title1, title2, badge, theme, date)
+    elif slide_num == 2:
+        img = slide_tezis(s2_accent, s2_bullets, 2, 5, theme)
+    elif slide_num == 3:
+        img = slide_tezis_with_plain(s3_accent, s3_bullets, s3_plain, 3, 5, theme)
+    elif slide_num == 4:
+        img = slide_stat(stat_num, stat_label, stat_ctx, theme)
+    elif slide_num == 5:
+        img = slide_cta(cta_text, theme)
+    else:
+        return jsonify({"error": "slide_num must be 1-5"}), 400
+
+    buf = img_to_bytes(img)
+    return send_file(buf, mimetype="image/png", download_name=f"slide_{slide_num:02d}.png")
 
 @app.route("/health")
 def health():
