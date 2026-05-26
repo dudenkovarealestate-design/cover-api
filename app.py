@@ -296,7 +296,9 @@ def cover():
         d.get("badge","БИЗНЕС-РОБОТИКС"),
         d.get("theme","blue"), d.get("date","")
     )
-    img = img.resize((1280,720), Image.LANCZOS)
+    # square=true → 1080x1080 (для Telegram), иначе 1280x720
+    if not d.get("square", False):
+        img = img.resize((1280,720), Image.LANCZOS)
     buf = img_to_bytes(img)
     return send_file(buf, mimetype="image/png", download_name="cover.png")
 
