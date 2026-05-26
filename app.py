@@ -18,17 +18,17 @@ THEMES = {
 
 def draw_glow_text(img, text, pos, font, color, glow_color, glow_radius=14, max_alpha=65):
     x, y = pos
-    glow_layer = Image.new("RGBA", img.size, (0,0,0,0))
-    gd = ImageDraw.Draw(glow_layer)
+    gl = Image.new("RGBA", img.size, (0,0,0,0))
+    gd = ImageDraw.Draw(gl)
     for offset in range(glow_radius, 0, -3):
         alpha = int(max_alpha * (1 - offset/glow_radius))
         gc = (*glow_color, alpha)
         for dx in [-offset, 0, offset]:
             for dy in [-offset, 0, offset]:
                 gd.text((x+dx, y+dy), text, font=font, fill=gc)
-    glow_layer = glow_layer.filter(ImageFilter.GaussianBlur(radius=glow_radius//3))
+    gl = gl.filter(ImageFilter.GaussianBlur(radius=glow_radius//3))
     img_rgba = img.convert("RGBA")
-    img_rgba = Image.alpha_composite(img_rgba, glow_layer)
+    img_rgba = Image.alpha_composite(img_rgba, gl)
     ImageDraw.Draw(img_rgba).text((x, y), text, font=font, fill=(*color, 255))
     return img_rgba.convert("RGB")
 
@@ -81,14 +81,23 @@ def wrap_text(draw, text, font, max_w):
     if cur: lines.append(cur)
     return lines
 
-def fit_font(draw, text, font_path, max_w, start_size, min_size=24):
-    size = start_size
-    while size >= min_size:
-        f = ImageFont.truetype(font_path, size)
+def bullet_real_h(draw, text, font, max_w, gap=20):
+    return len(wrap_text(draw, text, font, max_w)) * (font.size + 10) + gap
+
+def fit_font_width(draw, text, font_path, max_w, start=52, min_s=20):
+    sz = start
+    while sz >= min_s:
+        f = ImageFont.truetype(font_path, sz)
         if draw.textbbox((0,0), text, font=f)[2] <= max_w:
-            return f, size
-        size -= 2
-    return ImageFont.truetype(font_path, min_size), min_size
+            return f
+        sz -= 2
+    return ImageFont.truetype(font_path, min_s)
+
+def img_to_bytes(img):
+    buf = io.BytesIO()
+    img.save(buf, "PNG", quality=95)
+    buf.seek(0)
+    return buf
 
 def slide_cover(title1, title2, badge, theme="blue", date=""):
     img, CA, CD, T = base_image(theme)
@@ -135,43 +144,40 @@ def slide_tezis(accent_text, bullets, num, total, theme="blue"):
     img = add_slide_num(img, CA, num, total)
     draw = ImageDraw.Draw(img)
     MAX_W = W - 140
+    BUL_W = MAX_W - 38
 
-    # Заголовок — автоподбор размера
-    f_accent = ImageFont.truetype(FONT_PATH, 60)
-    while draw.textbbox((0,0), accent_text, font=f_accent)[2] > MAX_W and f_accent.size > 32:
+    f_accent = ImageFont.truetype(FONT_PATH, 58)
+    while draw.textbbox((0,0), accent_text, font=f_accent)[2] > MAX_W and f_accent.size > 28:
         f_accent = ImageFont.truetype(FONT_PATH, f_accent.size - 2)
     a_lines = wrap_text(draw, accent_text, f_accent, MAX_W)
     ACCENT_LH = f_accent.size + 12
-
-    # Буллеты — автоподбор размера
-    f_bullet = ImageFont.truetype(SANS_PATH, 36)
-    # Считаем сколько строк займут все буллеты
-    total_bullet_lines = sum(len(wrap_text(draw, b, f_bullet, MAX_W-38)) for b in bullets)
-    while total_bullet_lines * (f_bullet.size + 10) > 500 and f_bullet.size > 22:
-        f_bullet = ImageFont.truetype(SANS_PATH, f_bullet.size - 2)
-        total_bullet_lines = sum(len(wrap_text(draw, b, f_bullet, MAX_W-38)) for b in bullets)
-    BULLET_LH = f_bullet.size + 10
-    BULLET_BLOCK = len(bullets) * (BULLET_LH * 2 + 16)  # приблизительно
-
     ACCENT_H = len(a_lines) * ACCENT_LH
-    GAP = 44
-    total_h = ACCENT_H + GAP + BULLET_BLOCK
+    GAP = 40
+
+    f_b = ImageFont.truetype(SANS_PATH, 34)
+    AVAIL = H - 130 - ACCENT_H - GAP
+    while sum(bullet_real_h(draw, b, f_b, BUL_W) for b in bullets) > AVAIL and f_b.size > 18:
+        f_b = ImageFont.truetype(SANS_PATH, f_b.size - 2)
+    BUL_LH = f_b.size + 10
+
+    total_h = ACCENT_H + GAP + sum(bullet_real_h(draw, b, f_b, BUL_W) for b in bullets)
     y = max(110, (H - total_h) // 2)
 
     for line in a_lines:
-        img = draw_glow_text(img, line, (60,y), f_accent, CA, CA, 16, 70)
+        img = draw_glow_text(img, line, (60,y), f_accent, CA, CA, 14, 70)
         y += ACCENT_LH
     draw = ImageDraw.Draw(img)
     y += GAP
 
     for b in bullets:
+        b_lines = wrap_text(draw, b, f_b, BUL_W)
+        dot_y = y + f_b.size//2 - 7
+        draw.ellipse([60, dot_y, 74, dot_y+14], fill=CA)
         by_ = y
-        draw.ellipse([60,by_+f_bullet.size//2-8,76,by_+f_bullet.size//2+8], fill=CA)
-        b_lines = wrap_text(draw, b, f_bullet, MAX_W-38)
         for line in b_lines:
-            draw.text((94, by_), line, font=f_bullet, fill=(210,210,210))
-            by_ += BULLET_LH
-        y = by_ + 16
+            draw.text((90, by_), line, font=f_b, fill=(210,210,210))
+            by_ += BUL_LH
+        y = by_ + 20
 
     return img
 
@@ -182,52 +188,50 @@ def slide_tezis_with_plain(accent_text, bullets, plain_text, num, total, theme="
     img = add_slide_num(img, CA, num, total)
     draw = ImageDraw.Draw(img)
     MAX_W = W - 140
+    BUL_W = MAX_W - 38
 
-    # Заголовок
-    f_accent = ImageFont.truetype(FONT_PATH, 58)
-    while draw.textbbox((0,0), accent_text, font=f_accent)[2] > MAX_W and f_accent.size > 30:
+    f_accent = ImageFont.truetype(FONT_PATH, 54)
+    while draw.textbbox((0,0), accent_text, font=f_accent)[2] > MAX_W and f_accent.size > 26:
         f_accent = ImageFont.truetype(FONT_PATH, f_accent.size - 2)
     a_lines = wrap_text(draw, accent_text, f_accent, MAX_W)
     ACCENT_LH = f_accent.size + 12
     ACCENT_H = len(a_lines) * ACCENT_LH
 
-    # Буллеты
-    f_bullet = ImageFont.truetype(SANS_PATH, 34)
-    BULLET_LH = f_bullet.size + 10
-    bullet_lines_count = sum(len(wrap_text(draw, b, f_bullet, MAX_W-38)) for b in bullets)
+    f_b = ImageFont.truetype(SANS_PATH, 32)
+    BUL_LH = f_b.size + 10
+    GAP1 = 36
+    EXTRA = 44
 
-    # Последняя фраза — автоподбор
-    f_plain = ImageFont.truetype(FONT_PATH, 40)
-    plain_lines = wrap_text(draw, plain_text, f_plain, MAX_W)
-    while len(plain_lines) * (f_plain.size + 10) > 200 and f_plain.size > 24:
+    f_plain = ImageFont.truetype(FONT_PATH, 36)
+    p_lines = wrap_text(draw, plain_text, f_plain, MAX_W)
+    while len(p_lines) * (f_plain.size + 10) > 180 and f_plain.size > 20:
         f_plain = ImageFont.truetype(FONT_PATH, f_plain.size - 2)
-        plain_lines = wrap_text(draw, plain_text, f_plain, MAX_W)
+        p_lines = wrap_text(draw, plain_text, f_plain, MAX_W)
     PLAIN_LH = f_plain.size + 10
-    PLAIN_H = len(plain_lines) * PLAIN_LH
+    PLAIN_H = len(p_lines) * PLAIN_LH
 
-    GAP_AFTER_ACCENT = 40
-    BULLET_H = len(bullets) * (BULLET_LH * 2 + 14)
-    EXTRA_GAP = 50
-    total_h = ACCENT_H + GAP_AFTER_ACCENT + BULLET_H + EXTRA_GAP + PLAIN_H
+    BUL_H = sum(bullet_real_h(draw, b, f_b, BUL_W, 14) for b in bullets)
+    total_h = ACCENT_H + GAP1 + BUL_H + EXTRA + PLAIN_H
     y = max(100, (H - total_h) // 2)
 
     for line in a_lines:
-        img = draw_glow_text(img, line, (60,y), f_accent, CA, CA, 16, 70)
+        img = draw_glow_text(img, line, (60,y), f_accent, CA, CA, 14, 70)
         y += ACCENT_LH
     draw = ImageDraw.Draw(img)
-    y += GAP_AFTER_ACCENT
+    y += GAP1
 
     for b in bullets:
+        b_lines = wrap_text(draw, b, f_b, BUL_W)
+        dot_y = y + f_b.size//2 - 7
+        draw.ellipse([60, dot_y, 74, dot_y+14], fill=CA)
         by_ = y
-        draw.ellipse([60,by_+f_bullet.size//2-7,74,by_+f_bullet.size//2+7], fill=CA)
-        b_lines = wrap_text(draw, b, f_bullet, MAX_W-38)
         for line in b_lines:
-            draw.text((90, by_), line, font=f_bullet, fill=(210,210,210))
-            by_ += BULLET_LH
+            draw.text((90, by_), line, font=f_b, fill=(210,210,210))
+            by_ += BUL_LH
         y = by_ + 14
 
-    y += EXTRA_GAP
-    for line in plain_lines:
+    y += EXTRA
+    for line in p_lines:
         draw.text((60,y), line, font=f_plain, fill=(255,255,255))
         y += PLAIN_LH
 
@@ -241,14 +245,11 @@ def slide_stat(stat_num, stat_label, context, theme="blue"):
     MAX_W = W - 120
 
     f_big = ImageFont.truetype(FONT_PATH, 190)
+    f_label = fit_font_width(draw, stat_label, FONT_PATH, MAX_W, 50, 20)
 
-    # stat_label — автоподбор
-    f_label, _ = fit_font(draw, stat_label, FONT_PATH, MAX_W, 52, 24)
-
-    # context — автоподбор
-    f_ctx = ImageFont.truetype(SANS_PATH, 34)
+    f_ctx = ImageFont.truetype(SANS_PATH, 32)
     ctx_lines = wrap_text(draw, context, f_ctx, MAX_W)
-    while len(ctx_lines) * (f_ctx.size + 12) > 220 and f_ctx.size > 20:
+    while len(ctx_lines) * (f_ctx.size + 12) > 220 and f_ctx.size > 18:
         f_ctx = ImageFont.truetype(SANS_PATH, f_ctx.size - 2)
         ctx_lines = wrap_text(draw, context, f_ctx, MAX_W)
     ctx_lh = f_ctx.size + 12
@@ -309,28 +310,23 @@ def slide_cta(cta_text, theme="blue"):
     draw.text((PAD_X,H-72), "biz-robotics.com", font=f_site, fill=tuple(min(255,c+40) for c in CA))
     return img
 
-def img_to_bytes(img):
-    buf = io.BytesIO()
-    img.save(buf, "PNG", quality=95)
-    buf.seek(0)
-    return buf
-
-@app.route("/carousel", methods=["POST"])
-def carousel():
-    d = request.json or {}
+def make_slides(d):
     theme = d.get("theme","blue")
-    slides = [
+    return [
         slide_cover(d.get("title1",""), d.get("title2",""), d.get("badge","БИЗНЕС-РОБОТИКС"), theme, d.get("date","")),
         slide_tezis(d.get("s2_accent",""), d.get("s2_bullets",[]), 2, 5, theme),
         slide_tezis_with_plain(d.get("s3_accent",""), d.get("s3_bullets",[]), d.get("s3_plain",""), 3, 5, theme),
         slide_stat(d.get("stat_num",""), d.get("stat_label",""), d.get("stat_ctx",""), theme),
         slide_cta(d.get("cta_text",""), theme),
     ]
+
+@app.route("/carousel", methods=["POST"])
+def carousel():
+    slides = make_slides(request.json or {})
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
         for i, s in enumerate(slides, 1):
-            buf = io.BytesIO()
-            s.save(buf, "PNG", quality=95)
+            buf = io.BytesIO(); s.save(buf, "PNG", quality=95)
             zf.writestr(f"slide_{i:02d}.png", buf.getvalue())
     zip_buf.seek(0)
     return send_file(zip_buf, mimetype="application/zip", download_name="carousel.zip")
@@ -340,14 +336,13 @@ def slide():
     d = request.json or {}
     n = d.get("slide_num", 1)
     theme = d.get("theme","blue")
-    if n == 1: img = slide_cover(d.get("title1",""), d.get("title2",""), d.get("badge","БИЗНЕС-РОБОТИКС"), theme, d.get("date",""))
+    if   n == 1: img = slide_cover(d.get("title1",""), d.get("title2",""), d.get("badge","БИЗНЕС-РОБОТИКС"), theme, d.get("date",""))
     elif n == 2: img = slide_tezis(d.get("s2_accent",""), d.get("s2_bullets",[]), 2, 5, theme)
     elif n == 3: img = slide_tezis_with_plain(d.get("s3_accent",""), d.get("s3_bullets",[]), d.get("s3_plain",""), 3, 5, theme)
     elif n == 4: img = slide_stat(d.get("stat_num",""), d.get("stat_label",""), d.get("stat_ctx",""), theme)
     elif n == 5: img = slide_cta(d.get("cta_text",""), theme)
     else: return jsonify({"error":"slide_num 1-5"}), 400
-    buf = img_to_bytes(img)
-    return send_file(buf, mimetype="image/png", download_name=f"slide_{n:02d}.png")
+    return send_file(img_to_bytes(img), mimetype="image/png", download_name=f"slide_{n:02d}.png")
 
 @app.route("/cover", methods=["POST"])
 def cover():
